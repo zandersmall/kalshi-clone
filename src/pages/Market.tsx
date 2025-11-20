@@ -31,6 +31,8 @@ const Market = () => {
   const [user, setUser] = useState<User | null>(null);
   const [selectedOutcome, setSelectedOutcome] = useState<"Yes" | "No">("Yes");
   const [quantity, setQuantity] = useState<string>("10");
+  const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
+  const [userPosition, setUserPosition] = useState<number>(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -48,6 +50,28 @@ const Market = () => {
   useEffect(() => {
     fetchMarket();
   }, [id]);
+
+  useEffect(() => {
+    if (user && market) {
+      fetchUserPosition();
+    }
+  }, [user, market, selectedOutcome]);
+
+  const fetchUserPosition = async () => {
+    if (!user || !market) return;
+    
+    const { data } = await supabase
+      .from("positions")
+      .select("quantity")
+      .eq("user_id", user.id)
+      .eq("market_id", market.id)
+      .eq("outcome", selectedOutcome);
+    
+    if (data) {
+      const total = data.reduce((sum, p) => sum + p.quantity, 0);
+      setUserPosition(total);
+    }
+  };
 
   const fetchMarket = async () => {
     const { data: marketData } = await supabase
@@ -104,29 +128,53 @@ const Market = () => {
 
       const pricePerShare = parseFloat(option.current_probability.toString()) / 100;
 
-      // Call secure database function to execute trade atomically
-      const { data, error } = await supabase.rpc('execute_trade', {
-        p_user_id: user.id,
-        p_market_id: market!.id,
-        p_option_id: option.id,
-        p_outcome: selectedOutcome,
-        p_quantity: shares,
-        p_price_per_share: pricePerShare
-      });
-
-      if (error) {
-        if (error.message.includes('Insufficient balance')) {
-          toast.error("Insufficient balance for this trade");
-        } else if (error.message.includes('Quantity must be')) {
-          toast.error(error.message);
-        } else {
-          toast.error("Failed to complete trade");
+      if (tradeType === "sell") {
+        if (shares > userPosition) {
+          toast.error(`You only have ${userPosition} shares to sell.`);
+          setLoading(false);
+          return;
         }
-        return;
-      }
 
-      toast.success(`Successfully bought ${shares} ${selectedOutcome} shares!`);
+        const { error } = await supabase.rpc('sell_position', {
+          p_user_id: user.id,
+          p_market_id: market!.id,
+          p_outcome: selectedOutcome,
+          p_quantity: shares
+        });
+
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+
+        toast.success(`Successfully sold ${shares} ${selectedOutcome} shares!`);
+      } else {
+        // Call secure database function to execute trade atomically
+        const { error } = await supabase.rpc('execute_trade', {
+          p_user_id: user.id,
+          p_market_id: market!.id,
+          p_option_id: option.id,
+          p_outcome: selectedOutcome,
+          p_quantity: shares,
+          p_price_per_share: pricePerShare
+        });
+
+        if (error) {
+          if (error.message.includes('Insufficient balance')) {
+            toast.error("Insufficient balance for this trade");
+          } else if (error.message.includes('Quantity must be')) {
+            toast.error(error.message);
+          } else {
+            toast.error("Failed to complete trade");
+          }
+          return;
+        }
+
+        toast.success(`Successfully bought ${shares} ${selectedOutcome} shares!`);
+      }
+      
       setQuantity("10");
+      fetchUserPosition();
     } catch (error) {
       console.error('Trade error:', error);
       toast.error("Failed to complete trade");
@@ -190,7 +238,27 @@ const Market = () => {
 
           <div>
             <Card className="p-6 sticky top-24">
-              <h2 className="font-semibold mb-4">Trade</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold">Trade</h2>
+                <div className="bg-muted p-1 rounded-lg flex">
+                  <button
+                    onClick={() => setTradeType("buy")}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      tradeType === "buy" ? "bg-background shadow-sm" : "text-muted-foreground"
+                    }`}
+                  >
+                    Buy
+                  </button>
+                  <button
+                    onClick={() => setTradeType("sell")}
+                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      tradeType === "sell" ? "bg-background shadow-sm" : "text-muted-foreground"
+                    }`}
+                  >
+                    Sell
+                  </button>
+                </div>
+              </div>
               
               <Tabs value={selectedOutcome} onValueChange={(v) => setSelectedOutcome(v as "Yes" | "No")} className="mb-4">
                 <TabsList className="grid w-full grid-cols-2">
@@ -218,6 +286,12 @@ const Market = () => {
                 </div>
 
                 <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+                  {tradeType === "sell" && (
+                    <div className="flex justify-between text-sm text-blue-500 font-medium">
+                      <span>You own</span>
+                      <span>{userPosition} shares</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Price per share</span>
                     <span className="font-semibold">
@@ -228,7 +302,7 @@ const Market = () => {
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Total cost</span>
+                    <span className="text-muted-foreground">{tradeType === "buy" ? "Total cost" : "Est. Payout"}</span>
                     <span className="font-semibold">
                       ${((parseInt(quantity) || 0) * 
                         (selectedOutcome === "Yes" 
@@ -242,14 +316,19 @@ const Market = () => {
 
                 <Button
                   onClick={handleTrade}
-                  disabled={loading || !user}
+                  disabled={loading || !user || (tradeType === 'sell' && userPosition === 0)}
                   className={`w-full ${
                     selectedOutcome === "Yes"
                       ? "bg-yes hover:bg-yes/90"
                       : "bg-no hover:bg-no/90"
                   }`}
                 >
-                  {loading ? "Processing..." : user ? `Buy ${selectedOutcome}` : "Sign in to trade"}
+                  {loading 
+                    ? "Processing..." 
+                    : user 
+                      ? `${tradeType === "buy" ? "Buy" : "Sell"} ${selectedOutcome}` 
+                      : "Sign in to trade"
+                  }
                 </Button>
               </div>
             </Card>

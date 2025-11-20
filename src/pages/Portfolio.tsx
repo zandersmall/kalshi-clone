@@ -7,6 +7,7 @@ import { User } from "@supabase/supabase-js";
 
 interface Position {
   id: string;
+  market_id: string;
   market_title: string;
   outcome: string;
   quantity: number;
@@ -15,12 +16,38 @@ interface Position {
   created_at: string;
 }
 
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+
 const Portfolio = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+
+  const handleSell = async (position: Position) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase.rpc('sell_position', {
+        p_user_id: user.id,
+        p_market_id: position.market_id,
+        p_outcome: position.outcome,
+        p_quantity: position.quantity
+      });
+
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      toast.success(`Sold ${position.quantity} shares of ${position.market_title}`);
+      fetchPortfolio();
+    } catch (error) {
+      toast.error("Failed to sell position");
+    }
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -70,6 +97,7 @@ const Portfolio = () => {
         price_per_share,
         total_cost,
         created_at,
+        market_id,
         markets!inner(title)
       `)
       .eq("user_id", user.id)
@@ -78,6 +106,7 @@ const Portfolio = () => {
     if (positionsData) {
       const formattedPositions = positionsData.map((p: any) => ({
         id: p.id,
+        market_id: p.market_id,
         market_title: p.markets.title,
         outcome: p.outcome,
         quantity: p.quantity,
@@ -139,15 +168,24 @@ const Portfolio = () => {
                       {position.quantity} shares @ ${position.price_per_share.toFixed(2)}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className={`font-semibold ${
-                      position.outcome === 'Yes' ? 'text-yes' : 'text-no'
-                    }`}>
-                      {position.outcome}
+                  <div className="text-right flex flex-col items-end gap-2">
+                    <div className="text-right">
+                      <div className={`font-semibold ${
+                        position.outcome === 'Yes' ? 'text-yes' : 'text-no'
+                      }`}>
+                        {position.outcome}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        ${position.total_cost.toFixed(2)}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                      ${position.total_cost.toFixed(2)}
-                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleSell(position)}
+                    >
+                      Sell
+                    </Button>
                   </div>
                 </div>
               ))}
