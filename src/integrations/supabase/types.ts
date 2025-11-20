@@ -54,8 +54,12 @@ export type Database = {
           category: string
           created_at: string
           description: string | null
+          external_url: string | null
           icon: string | null
           id: string
+          kalshi_id: string | null
+          market_type: string | null
+          polymarket_id: string | null
           resolve_date: string | null
           resolved: boolean | null
           resolved_outcome: string | null
@@ -67,8 +71,12 @@ export type Database = {
           category: string
           created_at?: string
           description?: string | null
+          external_url?: string | null
           icon?: string | null
           id?: string
+          kalshi_id?: string | null
+          market_type?: string | null
+          polymarket_id?: string | null
           resolve_date?: string | null
           resolved?: boolean | null
           resolved_outcome?: string | null
@@ -80,8 +88,12 @@ export type Database = {
           category?: string
           created_at?: string
           description?: string | null
+          external_url?: string | null
           icon?: string | null
           id?: string
+          kalshi_id?: string | null
+          market_type?: string | null
+          polymarket_id?: string | null
           resolve_date?: string | null
           resolved?: boolean | null
           resolved_outcome?: string | null
@@ -135,6 +147,45 @@ export type Database = {
           },
           {
             foreignKeyName: "positions_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "market_options"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      probability_history: {
+        Row: {
+          id: string
+          market_id: string
+          option_id: string
+          probability: number
+          recorded_at: string
+        }
+        Insert: {
+          id?: string
+          market_id: string
+          option_id: string
+          probability: number
+          recorded_at?: string
+        }
+        Update: {
+          id?: string
+          market_id?: string
+          option_id?: string
+          probability?: number
+          recorded_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "probability_history_market_id_fkey"
+            columns: ["market_id"]
+            isOneToOne: false
+            referencedRelation: "markets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "probability_history_option_id_fkey"
             columns: ["option_id"]
             isOneToOne: false
             referencedRelation: "market_options"
