@@ -56,6 +56,13 @@ All colors MUST be HSL.
     /* Transitions */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    
+    /* Chart colors */
+    --chart-1: 217 91% 60%;
+    --chart-2: 280 83% 60%;
+    --chart-3: 158 90% 45%;
+    --chart-4: 30 100% 50%;
+    --chart-5: 340 82% 52%;
   }
 
   .dark {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Navbar from "@/components/Navbar";
 import MarketCard from "@/components/MarketCard";
+import SyncMarketsButton from "@/components/SyncMarketsButton";
 
 interface Market {
   id: string;
@@ -24,6 +25,27 @@ const Index = () => {
 
   useEffect(() => {
     fetchMarkets();
+
+    // Subscribe to real-time market updates
+    const channel = supabase
+      .channel('markets-list')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'markets'
+        },
+        () => {
+          console.log('Markets updated, refreshing...');
+          fetchMarkets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchMarkets = async () => {
@@ -66,11 +88,14 @@ const Index = () => {
       <Navbar />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Paper Trading Markets</h1>
-          <p className="text-muted-foreground">
-            Trade on real-world events with fake money. Track your performance risk-free.
-          </p>
+        <div className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-4xl font-bold mb-2">Paper Trading Markets</h1>
+            <p className="text-muted-foreground">
+              Trade on real-world events with fake money. Track your performance risk-free.
+            </p>
+          </div>
+          <SyncMarketsButton />
         </div>
 
         <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
@@ -91,8 +116,9 @@ const Index = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredMarkets.map((market) => {
-            const yesOption = market.options.find(o => o.title === "Yes");
-            const noOption = market.options.find(o => o.title === "No");
+            // Support both binary and multi-choice markets
+            const firstOption = market.options[0];
+            const secondOption = market.options[1];
             
             return (
               <MarketCard
@@ -101,8 +127,8 @@ const Index = () => {
                 title={market.title}
                 icon={market.icon}
                 category={market.category}
-                yesProb={yesOption?.current_probability || 50}
-                noProb={noOption?.current_probability || 50}
+                yesProb={firstOption?.current_probability || 50}
+                noProb={secondOption?.current_probability || (100 - (firstOption?.current_probability || 50))}
               />
             );
           })}

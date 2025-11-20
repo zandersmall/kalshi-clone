@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { User } from "@supabase/supabase-js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ProbabilityChart from "@/components/ProbabilityChart";
 
 interface Market {
   id: string;
@@ -29,7 +30,7 @@ const Market = () => {
   const [market, setMarket] = useState<Market | null>(null);
   const [options, setOptions] = useState<MarketOption[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [selectedOutcome, setSelectedOutcome] = useState<"Yes" | "No">("Yes");
+  const [selectedOutcome, setSelectedOutcome] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("10");
   const [tradeType, setTradeType] = useState<"buy" | "sell">("buy");
   const [userPosition, setUserPosition] = useState<number>(0);
@@ -49,6 +50,49 @@ const Market = () => {
 
   useEffect(() => {
     fetchMarket();
+
+    // Subscribe to real-time market updates
+    const marketChannel = supabase
+      .channel('market-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'markets',
+          filter: `id=eq.${id}`
+        },
+        (payload) => {
+          console.log('Market updated:', payload);
+          setMarket(payload.new as Market);
+        }
+      )
+      .subscribe();
+
+    // Subscribe to real-time option updates
+    const optionsChannel = supabase
+      .channel('options-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'market_options',
+          filter: `market_id=eq.${id}`
+        },
+        (payload) => {
+          console.log('Option updated:', payload);
+          setOptions(prev => prev.map(opt => 
+            opt.id === payload.new.id ? payload.new as MarketOption : opt
+          ));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(marketChannel);
+      supabase.removeChannel(optionsChannel);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -91,6 +135,10 @@ const Market = () => {
 
     if (optionsData) {
       setOptions(optionsData);
+      // Set first option as selected by default
+      if (optionsData.length > 0 && !selectedOutcome) {
+        setSelectedOutcome(optionsData[0].title);
+      }
     }
   };
 
@@ -216,24 +264,7 @@ const Market = () => {
               <p className="text-muted-foreground">{market.description}</p>
             </Card>
 
-            <Card className="p-6">
-              <h2 className="font-semibold mb-4">Probability Chart</h2>
-              <div className="h-64 flex items-center justify-center bg-muted/30 rounded-lg">
-                <div className="text-center text-muted-foreground">
-                  <div className="mb-2">Current Odds</div>
-                  <div className="flex gap-8">
-                    <div>
-                      <div className="text-4xl font-bold text-yes">{yesOption?.current_probability}%</div>
-                      <div className="text-sm">Yes</div>
-                    </div>
-                    <div>
-                      <div className="text-4xl font-bold text-no">{noOption?.current_probability}%</div>
-                      <div className="text-sm">No</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
+            <ProbabilityChart marketId={market.id} options={options} />
           </div>
 
           <div>
@@ -260,14 +291,17 @@ const Market = () => {
                 </div>
               </div>
               
-              <Tabs value={selectedOutcome} onValueChange={(v) => setSelectedOutcome(v as "Yes" | "No")} className="mb-4">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="Yes" className="data-[state=active]:bg-yes data-[state=active]:text-white">
-                    Yes {yesOption?.current_probability}¢
-                  </TabsTrigger>
-                  <TabsTrigger value="No" className="data-[state=active]:bg-no data-[state=active]:text-white">
-                    No {noOption?.current_probability}¢
-                  </TabsTrigger>
+              <Tabs value={selectedOutcome} onValueChange={setSelectedOutcome} className="mb-4">
+                <TabsList className={`grid w-full ${options.length === 2 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+                  {options.map((option) => (
+                    <TabsTrigger 
+                      key={option.id} 
+                      value={option.title}
+                      className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                    >
+                      {option.title} {option.current_probability.toFixed(1)}%
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
               </Tabs>
 
@@ -295,33 +329,28 @@ const Market = () => {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Price per share</span>
                     <span className="font-semibold">
-                      ${selectedOutcome === "Yes" 
-                        ? ((yesOption?.current_probability ?? 0) / 100).toFixed(2)
-                        : ((noOption?.current_probability ?? 0) / 100).toFixed(2)
-                      }
+                      ${(() => {
+                        const selectedOption = options.find(o => o.title === selectedOutcome);
+                        return ((selectedOption?.current_probability ?? 0) / 100).toFixed(2);
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">{tradeType === "buy" ? "Total cost" : "Est. Payout"}</span>
                     <span className="font-semibold">
-                      ${((parseInt(quantity) || 0) * 
-                        (selectedOutcome === "Yes" 
-                          ? (yesOption?.current_probability ?? 0) / 100
-                          : (noOption?.current_probability ?? 0) / 100
-                        )).toFixed(2)
-                      }
+                      ${(() => {
+                        const selectedOption = options.find(o => o.title === selectedOutcome);
+                        const price = (selectedOption?.current_probability ?? 0) / 100;
+                        return ((parseInt(quantity) || 0) * price).toFixed(2);
+                      })()}
                     </span>
                   </div>
                 </div>
 
                 <Button
                   onClick={handleTrade}
-                  disabled={loading || !user || (tradeType === 'sell' && userPosition === 0)}
-                  className={`w-full ${
-                    selectedOutcome === "Yes"
-                      ? "bg-yes hover:bg-yes/90"
-                      : "bg-no hover:bg-no/90"
-                  }`}
+                  disabled={loading || !user || (tradeType === 'sell' && userPosition === 0) || !selectedOutcome}
+                  className="w-full bg-primary hover:bg-primary/90"
                 >
                   {loading 
                     ? "Processing..." 
