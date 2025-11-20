@@ -21,11 +21,12 @@ serve(async (req) => {
     // Extract ticker from URL
     // Example: https://kalshi.com/markets/KXHIGHNY/will-nyc-reach-96-degrees
     // Ticker: KXHIGHNY
-    const match = url.match(/markets\/([A-Z0-9-]+)/);
+    // Regex needs to handle lowercase and alphanumeric
+    const match = url.match(/markets\/([a-zA-Z0-9-]+)/);
     if (!match) {
       throw new Error("Invalid Kalshi URL format. Expected https://kalshi.com/markets/TICKER/...");
     }
-    const seriesTicker = match[1];
+    const seriesTicker = match[1].toUpperCase();
 
     console.log(`Fetching details for series: ${seriesTicker}`);
 
