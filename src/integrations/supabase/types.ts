@@ -206,6 +206,15 @@ export type Database = {
         }
         Returns: Json
       }
+      sell_position: {
+        Args: {
+          p_market_id: string
+          p_outcome: string
+          p_quantity: number
+          p_user_id: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

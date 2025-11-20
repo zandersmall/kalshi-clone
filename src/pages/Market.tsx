@@ -296,8 +296,8 @@ const Market = () => {
                     <span className="text-muted-foreground">Price per share</span>
                     <span className="font-semibold">
                       ${selectedOutcome === "Yes" 
-                        ? (yesOption!.current_probability / 100).toFixed(2)
-                        : (noOption!.current_probability / 100).toFixed(2)
+                        ? ((yesOption?.current_probability ?? 0) / 100).toFixed(2)
+                        : ((noOption?.current_probability ?? 0) / 100).toFixed(2)
                       }
                     </span>
                   </div>
@@ -306,8 +306,8 @@ const Market = () => {
                     <span className="font-semibold">
                       ${((parseInt(quantity) || 0) * 
                         (selectedOutcome === "Yes" 
-                          ? yesOption!.current_probability / 100
-                          : noOption!.current_probability / 100
+                          ? (yesOption?.current_probability ?? 0) / 100
+                          : (noOption?.current_probability ?? 0) / 100
                         )).toFixed(2)
                       }
                     </span>
