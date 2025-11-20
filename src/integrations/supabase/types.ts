@@ -64,6 +64,7 @@ export type Database = {
           resolved: boolean | null
           resolved_outcome: string | null
           status: string
+          ticker: string | null
           title: string
           updated_at: string
         }
@@ -81,6 +82,7 @@ export type Database = {
           resolved?: boolean | null
           resolved_outcome?: string | null
           status?: string
+          ticker?: string | null
           title: string
           updated_at?: string
         }
@@ -98,6 +100,7 @@ export type Database = {
           resolved?: boolean | null
           resolved_outcome?: string | null
           status?: string
+          ticker?: string | null
           title?: string
           updated_at?: string
         }

@@ -35,7 +35,7 @@ serve(async (req) => {
     }
 
     const updates = [];
-    const historyRecords = [];
+    const historyRecords: Array<{market_id: string, option_id: string, probability: number}> = [];
 
     // 2. Iterate and update
     for (const saved of savedMarkets) {
@@ -95,7 +95,8 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Sync error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
