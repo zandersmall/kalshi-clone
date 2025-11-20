@@ -63,7 +63,7 @@ const AddMarketButton = () => {
              title: title,
              current_probability: m.yes_price,
              kalshi_id: m.ticker
-          }, { onConflict: 'market_id, title' as any }); // Supabase JS type workaround
+          }, { onConflict: 'kalshi_id' });
         } else {
           // Binary
           await supabase.from('market_options').upsert({
@@ -71,13 +71,13 @@ const AddMarketButton = () => {
              title: 'Yes',
              current_probability: m.yes_price,
              kalshi_id: `${m.ticker}-Yes`
-          });
+          }, { onConflict: 'kalshi_id' });
            await supabase.from('market_options').upsert({
              market_id: marketData.id,
              title: 'No',
              current_probability: m.no_price,
              kalshi_id: `${m.ticker}-No`
-          });
+          }, { onConflict: 'kalshi_id' });
         }
       }
 
@@ -90,7 +90,9 @@ const AddMarketButton = () => {
       
     } catch (error) {
       console.error('Add error:', error);
-      toast.error('Failed to add market');
+      // @ts-ignore
+      const message = error?.message || 'Failed to add market';
+      toast.error(`Failed to add market: ${message}`);
     } finally {
       setLoading(false);
     }
