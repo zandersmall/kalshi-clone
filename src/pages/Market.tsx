@@ -83,56 +83,52 @@ const Market = () => {
       return;
     }
 
+    if (shares > 10000) {
+      toast.error("Maximum 10,000 shares per trade");
+      return;
+    }
+
+    if (!Number.isInteger(parseFloat(quantity))) {
+      toast.error("Quantity must be a whole number");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const option = options.find(o => o.title === selectedOutcome);
-      if (!option) return;
+      if (!option) {
+        toast.error("Market option not found");
+        return;
+      }
 
       const pricePerShare = parseFloat(option.current_probability.toString()) / 100;
-      const totalCost = shares * pricePerShare;
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("balance")
-        .eq("id", user.id)
-        .maybeSingle();
+      // Call secure database function to execute trade atomically
+      const { data, error } = await supabase.rpc('execute_trade', {
+        p_user_id: user.id,
+        p_market_id: market!.id,
+        p_option_id: option.id,
+        p_outcome: selectedOutcome,
+        p_quantity: shares,
+        p_price_per_share: pricePerShare
+      });
 
-      if (!profile) {
-        toast.error("Profile not found");
+      if (error) {
+        if (error.message.includes('Insufficient balance')) {
+          toast.error("Insufficient balance for this trade");
+        } else if (error.message.includes('Quantity must be')) {
+          toast.error(error.message);
+        } else {
+          toast.error("Failed to complete trade");
+        }
         return;
       }
-
-      const currentBalance = parseFloat(profile.balance.toString());
-      if (currentBalance < totalCost) {
-        toast.error("Insufficient balance");
-        return;
-      }
-
-      const { error: positionError } = await supabase
-        .from("positions")
-        .insert({
-          user_id: user.id,
-          market_id: market!.id,
-          option_id: option.id,
-          outcome: selectedOutcome,
-          quantity: shares,
-          price_per_share: pricePerShare,
-          total_cost: totalCost,
-        });
-
-      if (positionError) throw positionError;
-
-      const { error: balanceError } = await supabase
-        .from("profiles")
-        .update({ balance: currentBalance - totalCost })
-        .eq("id", user.id);
-
-      if (balanceError) throw balanceError;
 
       toast.success(`Successfully bought ${shares} ${selectedOutcome} shares!`);
       setQuantity("10");
     } catch (error) {
+      console.error('Trade error:', error);
       toast.error("Failed to complete trade");
     } finally {
       setLoading(false);
@@ -215,6 +211,8 @@ const Market = () => {
                     value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
                     min="1"
+                    max="10000"
+                    step="1"
                     placeholder="Enter quantity"
                   />
                 </div>
