@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -6,12 +6,21 @@ import { Card } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Plus, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const AddMarketButton = () => {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<any>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
+    });
+  }, []);
 
   const handlePreview = async () => {
     if (!url) return;
@@ -33,6 +42,13 @@ const AddMarketButton = () => {
 
   const handleAdd = async () => {
     if (!preview) return;
+    
+    if (!isAuthenticated) {
+      toast.error('Please log in to add markets');
+      navigate('/auth');
+      return;
+    }
+    
     setLoading(true);
     try {
       // 1. Insert Market
@@ -98,10 +114,19 @@ const AddMarketButton = () => {
     }
   };
 
+  const handleOpenDialog = () => {
+    if (!isAuthenticated) {
+      toast.error('Please log in to add markets');
+      navigate('/auth');
+      return;
+    }
+    setOpen(true);
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2">
+        <Button className="gap-2" onClick={handleOpenDialog}>
           <Plus className="h-4 w-4" />
           Add Market
         </Button>
