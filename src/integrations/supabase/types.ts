@@ -14,7 +14,158 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      market_options: {
+        Row: {
+          created_at: string
+          current_probability: number
+          id: string
+          market_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_probability?: number
+          id?: string
+          market_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_probability?: number
+          id?: string
+          market_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_options_market_id_fkey"
+            columns: ["market_id"]
+            isOneToOne: false
+            referencedRelation: "markets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      markets: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          icon: string | null
+          id: string
+          resolve_date: string | null
+          resolved: boolean | null
+          resolved_outcome: string | null
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          resolve_date?: string | null
+          resolved?: boolean | null
+          resolved_outcome?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          resolve_date?: string | null
+          resolved?: boolean | null
+          resolved_outcome?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      positions: {
+        Row: {
+          created_at: string
+          id: string
+          market_id: string
+          option_id: string
+          outcome: string
+          price_per_share: number
+          quantity: number
+          total_cost: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          market_id: string
+          option_id: string
+          outcome: string
+          price_per_share: number
+          quantity: number
+          total_cost: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          market_id?: string
+          option_id?: string
+          outcome?: string
+          price_per_share?: number
+          quantity?: number
+          total_cost?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "positions_market_id_fkey"
+            columns: ["market_id"]
+            isOneToOne: false
+            referencedRelation: "markets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "positions_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "market_options"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          balance: number
+          created_at: string
+          id: string
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          balance?: number
+          created_at?: string
+          id: string
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          balance?: number
+          created_at?: string
+          id?: string
+          updated_at?: string
+          username?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
