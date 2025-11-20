@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+const KALSHI_PUBLIC_API_URL = 'https://api.elections.kalshi.com/trade-api/v2';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -16,178 +18,151 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log('Starting market sync...');
+    console.log('Starting Kalshi market sync via public API...');
 
-    // Fetch from Polymarket API (public, no auth needed)
-    const polyResponse = await fetch('https://gamma-api.polymarket.com/markets?limit=50&active=true');
-    
-    if (!polyResponse.ok) {
-      throw new Error(`Polymarket API Error: ${polyResponse.status}`);
+    // 1. Fetch Markets (Public Endpoint)
+    // Using the elections endpoint as it often exposes public data easier, or try the main one if limits allow.
+    // Docs suggest /markets is public.
+    const response = await fetch(`${KALSHI_PUBLIC_API_URL}/markets?limit=100&status=open`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Kalshi API Error: ${response.status} ${errorText}`);
     }
 
-    const polyMarkets = await polyResponse.json();
-    console.log(`Fetched ${polyMarkets.length} markets from Polymarket`);
+    const data = await response.json();
+    const markets = data.markets || [];
+    console.log(`Fetched ${markets.length} markets from Kalshi`);
 
     const updates = [];
-    const optionUpdates = [];
     const historyRecords = [];
 
-    for (const market of polyMarkets) {
-      // Map Polymarket categories to our categories
-      const categoryMap: Record<string, string> = {
-        'politics': 'Politics',
-        'crypto': 'Crypto',
-        'sports': 'Sports',
-        'pop-culture': 'Culture',
-        'science': 'Tech & Science',
-        'climate': 'Climate'
-      };
-
-      const category = categoryMap[market.groupItemTitle?.toLowerCase()] || 
-                      categoryMap[market.category?.toLowerCase()] || 
-                      'Other';
-
-      // Determine market type
-      const isBinary = market.outcomes?.length === 2;
-      const marketType = isBinary ? 'binary' : 'multiple_choice';
-
-      // Insert/update market
-      const marketData = {
-        polymarket_id: market.id || market.condition_id,
-        title: market.question || market.title,
-        description: market.description || market.question,
-        category: category,
-        icon: getCategoryIcon(category),
-        status: market.closed ? 'closed' : 'active',
-        market_type: marketType,
-        external_url: `https://polymarket.com/event/${market.slug || market.id}`
-      };
-
-      const { data: existingMarket, error: selectError } = await supabase
+    // Process markets
+    for (const m of markets) {
+      const category = m.category || 'Other';
+      
+      // Upsert Market
+      const { data: marketData, error: marketError } = await supabase
         .from('markets')
-        .select('id')
-        .eq('polymarket_id', marketData.polymarket_id)
+        .upsert({
+          kalshi_id: m.ticker,
+          ticker: m.ticker,
+          title: m.title,
+          category: category,
+          description: m.subtitle || m.title,
+          status: m.status,
+          icon: getCategoryIcon(category),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'kalshi_id' })
+        .select()
         .single();
 
-      let marketId;
-
-      if (existingMarket) {
-        // Update existing market
-        const { error: updateError } = await supabase
-          .from('markets')
-          .update(marketData)
-          .eq('id', existingMarket.id);
-        
-        if (updateError) {
-          console.error('Error updating market:', updateError);
-          continue;
-        }
-        marketId = existingMarket.id;
-      } else {
-        // Insert new market
-        const { data: newMarket, error: insertError } = await supabase
-          .from('markets')
-          .insert(marketData)
-          .select('id')
-          .single();
-        
-        if (insertError) {
-          console.error('Error inserting market:', insertError);
-          continue;
-        }
-        marketId = newMarket.id;
+      if (marketError) {
+        console.error(`Error upserting market ${m.ticker}:`, marketError);
+        continue;
       }
 
-      // Sync market options
-      if (market.outcomes && market.outcomePrices) {
-        for (let i = 0; i < market.outcomes.length; i++) {
-          const outcome = market.outcomes[i];
-          const price = parseFloat(market.outcomePrices[i]) * 100; // Convert to percentage
+      updates.push(m.ticker);
 
-          const { data: existingOption } = await supabase
-            .from('market_options')
-            .select('id, current_probability')
-            .eq('market_id', marketId)
-            .eq('title', outcome)
-            .single();
+      // Kalshi public API typically returns 'yes_bid', 'yes_ask', 'last_price'
+      let yesPrice = m.last_price;
+      if (!yesPrice && m.yes_bid && m.yes_ask) {
+        yesPrice = Math.round((m.yes_bid + m.yes_ask) / 2);
+      }
+      // If absolutely no price data, skip updating options to avoid bad data
+      if (yesPrice === undefined || yesPrice === null) continue;
 
-          if (existingOption) {
-            // Update existing option
+      const noPrice = 100 - yesPrice;
+
+      const outcomes = [
+        { title: 'Yes', price: yesPrice },
+        { title: 'No', price: noPrice }
+      ];
+
+      for (const outcome of outcomes) {
+        // Check existing to see if price changed
+        const { data: existing } = await supabase
+          .from('market_options')
+          .select('id, current_probability')
+          .eq('market_id', marketData.id)
+          .eq('title', outcome.title)
+          .maybeSingle();
+
+        if (existing) {
+          // Only update if changed
+          if (existing.current_probability !== outcome.price) {
             await supabase
               .from('market_options')
-              .update({ current_probability: price })
-              .eq('id', existingOption.id);
-
-            // Record probability change if different
-            if (Math.abs(existingOption.current_probability - price) > 0.01) {
-              historyRecords.push({
-                market_id: marketId,
-                option_id: existingOption.id,
-                probability: price
-              });
-            }
-          } else {
-            // Insert new option
-            const { data: newOption } = await supabase
-              .from('market_options')
-              .insert({
-                market_id: marketId,
-                title: outcome,
-                current_probability: price
+              .update({ 
+                current_probability: outcome.price,
+                updated_at: new Date().toISOString()
               })
-              .select('id')
-              .single();
+              .eq('id', existing.id);
 
-            if (newOption) {
-              historyRecords.push({
-                market_id: marketId,
-                option_id: newOption.id,
-                probability: price
-              });
-            }
+            historyRecords.push({
+              market_id: marketData.id,
+              option_id: existing.id,
+              probability: outcome.price
+            });
+          }
+        } else {
+          // Insert new
+          const { data: newOpt } = await supabase
+            .from('market_options')
+            .insert({
+              market_id: marketData.id,
+              title: outcome.title,
+              current_probability: outcome.price
+            })
+            .select()
+            .single();
+            
+          if (newOpt) {
+            historyRecords.push({
+              market_id: marketData.id,
+              option_id: newOpt.id,
+              probability: outcome.price
+            });
           }
         }
       }
-
-      updates.push(marketData);
     }
 
-    // Batch insert history records
+
+    // Batch insert history
     if (historyRecords.length > 0) {
-      await supabase.from('probability_history').insert(historyRecords);
-      console.log(`Recorded ${historyRecords.length} probability updates`);
+      const { error: historyError } = await supabase
+        .from('probability_history')
+        .insert(historyRecords);
+      
+      if (historyError) console.error('History insert error:', historyError);
     }
-
-    console.log(`Successfully synced ${updates.length} markets`);
 
     return new Response(JSON.stringify({ 
       success: true, 
       markets_synced: updates.length,
-      probability_records: historyRecords.length,
-      message: "Markets synced successfully from Polymarket"
+      history_records: historyRecords.length,
+      message: "Kalshi markets synced successfully"
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
     console.error('Sync error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-});
+})
 
 function getCategoryIcon(category: string): string {
-  const icons: Record<string, string> = {
-    'Politics': '🏛️',
-    'Crypto': '₿',
-    'Sports': '⚽',
-    'Culture': '🎵',
-    'Tech & Science': '🤖',
-    'Climate': '🌡️',
-    'Other': '📊'
-  };
-  return icons[category] || '📊';
+  const c = category.toLowerCase();
+  if (c.includes('politic') || c.includes('gov')) return '🏛️';
+  if (c.includes('crypto') || c.includes('bitcoin')) return '₿';
+  if (c.includes('sport')) return '⚽';
+  if (c.includes('tech') || c.includes('sci')) return '🤖';
+  if (c.includes('econ') || c.includes('fin')) return '📈';
+  if (c.includes('climat') || c.includes('weather')) return '🌡️';
+  return '📊';
 }

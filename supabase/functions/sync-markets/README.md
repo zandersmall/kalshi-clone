@@ -1,62 +1,39 @@
-# Sync Markets Edge Function
+# Sync Kalshi Markets Edge Function
 
-This function syncs prediction markets from Polymarket's public API into your Supabase database.
+This function syncs live market data from Kalshi's **public** API to your Supabase database.
 
-## Features
+**No API keys are required** for this version.
 
-- ✅ Fetches live markets from Polymarket
-- ✅ Supports both binary (Yes/No) and multiple-choice markets
-- ✅ Records probability history for charting
-- ✅ Real-time updates via Supabase subscriptions
-- ✅ No authentication required (public API)
+## Scheduling (Every 10 Minutes)
 
-## Manual Sync
+To keep your market data fresh, you should schedule this function to run every 10 minutes.
 
-Click the "Sync Markets" button on the homepage to manually trigger a sync.
+### Option 1: Supabase Dashboard (Recommended)
+1. Go to your Supabase Dashboard.
+2. Navigate to **Integrations** -> **Edge Functions**.
+3. (If available) Enable "Scheduled Functions".
+4. Or go to **Database** -> **Extensions** and enable `pg_cron`.
+5. Run the following SQL in the **SQL Editor**:
 
-## Automatic Syncing
-
-To set up automatic syncing every 5 minutes, you can use:
-
-### Option 1: Supabase Cron (Recommended)
-
-Add to your `supabase/config.toml`:
-
-```toml
-[functions.sync-markets.schedule]
-cron = "*/5 * * * *"  # Every 5 minutes
+```sql
+select cron.schedule(
+  'sync-markets-every-10-mins',
+  '*/10 * * * *', -- Every 10 minutes
+  $$
+    select
+      net.http_post(
+          url:='https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/sync-markets',
+          headers:='{"Content-Type": "application/json", "Authorization": "Bearer <YOUR_ANON_KEY>"}'::jsonb
+      ) as request_id;
+  $$
+);
 ```
+*Replace `<YOUR_PROJECT_REF>` and `<YOUR_ANON_KEY>` with your actual values.*
 
-### Option 2: External Cron Service
-
-Use a service like cron-job.org or GitHub Actions to call:
+### Option 2: GitHub Actions or Cron Job
+You can also use an external cron service (like GitHub Actions or cron-job.org) to `curl` your function URL periodically.
 
 ```bash
-curl -X POST https://ziihwvmenujirdaptbcx.supabase.co/functions/v1/sync-markets
+curl -X POST 'https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/sync-markets' \
+  -H 'Authorization: Bearer <YOUR_ANON_KEY>'
 ```
-
-## API Response
-
-```json
-{
-  "success": true,
-  "markets_synced": 50,
-  "probability_records": 100,
-  "message": "Markets synced successfully from Polymarket"
-}
-```
-
-## Markets Supported
-
-The function fetches the top 50 active markets from Polymarket, including:
-- US Politics (Presidential elections, legislation, etc.)
-- Crypto (Bitcoin, Ethereum prices)
-- Sports (game outcomes, championships)
-- Pop Culture (awards, entertainment)
-- Science & Technology
-
-## Database Tables Used
-
-- `markets` - Market metadata and status
-- `market_options` - Individual outcomes (Yes/No or multiple choices)
-- `probability_history` - Historical probability data for charts
