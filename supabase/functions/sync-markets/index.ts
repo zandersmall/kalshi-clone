@@ -18,131 +18,77 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log('Starting Kalshi market sync via public API...');
+    console.log('Starting sync for SAVED markets...');
 
-    // 1. Fetch Markets (Public Endpoint)
-    // Using the elections endpoint as it often exposes public data easier, or try the main one if limits allow.
-    // Docs suggest /markets is public.
-    const response = await fetch(`${KALSHI_PUBLIC_API_URL}/markets?limit=100&status=open`);
+    // 1. Get all active markets from DB
+    const { data: savedMarkets, error: dbError } = await supabase
+      .from('markets')
+      .select('kalshi_id')
+      .eq('status', 'active');
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Kalshi API Error: ${response.status} ${errorText}`);
+    if (dbError) throw dbError;
+
+    if (!savedMarkets || savedMarkets.length === 0) {
+      return new Response(JSON.stringify({ message: "No active markets to sync" }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
-
-    const data = await response.json();
-    const markets = data.markets || [];
-    console.log(`Fetched ${markets.length} markets from Kalshi`);
 
     const updates = [];
     const historyRecords = [];
 
-    // Process markets
-    for (const m of markets) {
-      const category = m.category || 'Other';
+    // 2. Iterate and update
+    for (const saved of savedMarkets) {
+      const seriesTicker = saved.kalshi_id;
       
-      // Upsert Market
-      const { data: marketData, error: marketError } = await supabase
-        .from('markets')
-        .upsert({
-          kalshi_id: m.ticker,
-          ticker: m.ticker,
-          title: m.title,
-          category: category,
-          description: m.subtitle || m.title,
-          status: m.status,
-          icon: getCategoryIcon(category),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'kalshi_id' })
-        .select()
-        .single();
-
-      if (marketError) {
-        console.error(`Error upserting market ${m.ticker}:`, marketError);
+      // Fetch fresh data
+      const response = await fetch(`${KALSHI_PUBLIC_API_URL}/markets?series_ticker=${seriesTicker}`);
+      if (!response.ok) {
+        console.error(`Failed to fetch ${seriesTicker}: ${response.status}`);
         continue;
       }
 
-      updates.push(m.ticker);
+      const data = await response.json();
+      const markets = data.markets || [];
 
-      // Kalshi public API typically returns 'yes_bid', 'yes_ask', 'last_price'
-      let yesPrice = m.last_price;
-      if (!yesPrice && m.yes_bid && m.yes_ask) {
-        yesPrice = Math.round((m.yes_bid + m.yes_ask) / 2);
+      if (markets.length === 0) continue;
+
+      // Update logic (similar to before but scoped)
+      // We assume the Market (Series) exists, we update its options
+      
+      for (const m of markets) {
+         let price = m.last_price;
+         if (!price && m.yes_bid && m.yes_ask) {
+           price = Math.round((m.yes_bid + m.yes_ask) / 2);
+         }
+         if (!price) price = 1; // Default to low not 50 to avoid confusion if inactive
+
+         // Determine Option Title
+         // If only 1 market in response, it's binary Yes/No
+         // If multiple, it's multi-outcome
+         const isMulti = markets.length > 1;
+         
+         if (isMulti) {
+            const title = m.subtitle || m.ticker;
+            await updateOption(supabase, saved.kalshi_id, title, price, historyRecords);
+         } else {
+            // Binary
+            await updateOption(supabase, saved.kalshi_id, 'Yes', price, historyRecords);
+            await updateOption(supabase, saved.kalshi_id, 'No', 100 - price, historyRecords);
+         }
       }
-      // If absolutely no price data, skip updating options to avoid bad data
-      if (yesPrice === undefined || yesPrice === null) continue;
-
-      const noPrice = 100 - yesPrice;
-
-      const outcomes = [
-        { title: 'Yes', price: yesPrice },
-        { title: 'No', price: noPrice }
-      ];
-
-      for (const outcome of outcomes) {
-        // Check existing to see if price changed
-        const { data: existing } = await supabase
-          .from('market_options')
-          .select('id, current_probability')
-          .eq('market_id', marketData.id)
-          .eq('title', outcome.title)
-          .maybeSingle();
-
-        if (existing) {
-          // Only update if changed
-          if (existing.current_probability !== outcome.price) {
-            await supabase
-              .from('market_options')
-              .update({ 
-                current_probability: outcome.price,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', existing.id);
-
-            historyRecords.push({
-              market_id: marketData.id,
-              option_id: existing.id,
-              probability: outcome.price
-            });
-          }
-        } else {
-          // Insert new
-          const { data: newOpt } = await supabase
-            .from('market_options')
-            .insert({
-              market_id: marketData.id,
-              title: outcome.title,
-              current_probability: outcome.price
-            })
-            .select()
-            .single();
-            
-          if (newOpt) {
-            historyRecords.push({
-              market_id: marketData.id,
-              option_id: newOpt.id,
-              probability: outcome.price
-            });
-          }
-        }
-      }
+      updates.push(seriesTicker);
     }
-
 
     // Batch insert history
     if (historyRecords.length > 0) {
-      const { error: historyError } = await supabase
-        .from('probability_history')
-        .insert(historyRecords);
-      
-      if (historyError) console.error('History insert error:', historyError);
+      await supabase.from('probability_history').insert(historyRecords);
     }
 
     return new Response(JSON.stringify({ 
       success: true, 
-      markets_synced: updates.length,
-      history_records: historyRecords.length,
-      message: "Kalshi markets synced successfully"
+      markets_updated: updates.length, 
+      history_records: historyRecords.length 
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -156,13 +102,56 @@ serve(async (req) => {
   }
 })
 
-function getCategoryIcon(category: string): string {
-  const c = category.toLowerCase();
-  if (c.includes('politic') || c.includes('gov')) return '🏛️';
-  if (c.includes('crypto') || c.includes('bitcoin')) return '₿';
-  if (c.includes('sport')) return '⚽';
-  if (c.includes('tech') || c.includes('sci')) return '🤖';
-  if (c.includes('econ') || c.includes('fin')) return '📈';
-  if (c.includes('climat') || c.includes('weather')) return '🌡️';
-  return '📊';
+async function updateOption(supabase: any, seriesTicker: string, title: string, price: number, historyRecords: any[]) {
+  // Get market_id from seriesTicker
+  const { data: market } = await supabase
+    .from('markets')
+    .select('id')
+    .eq('kalshi_id', seriesTicker)
+    .single();
+    
+  if (!market) return;
+
+  // Upsert Option
+  // We use a join or just try to select first
+  const { data: option } = await supabase
+    .from('market_options')
+    .select('id, current_probability')
+    .eq('market_id', market.id)
+    .eq('title', title)
+    .maybeSingle();
+
+  if (option) {
+    if (option.current_probability !== price) {
+      await supabase
+        .from('market_options')
+        .update({ current_probability: price, updated_at: new Date().toISOString() })
+        .eq('id', option.id);
+      
+      historyRecords.push({
+        market_id: market.id,
+        option_id: option.id,
+        probability: price
+      });
+    }
+  } else {
+      // Option doesn't exist? Create it.
+      const { data: newOpt } = await supabase
+        .from('market_options')
+        .insert({
+            market_id: market.id,
+            title: title,
+            current_probability: price
+        })
+        .select()
+        .single();
+        
+       if (newOpt) {
+         historyRecords.push({
+            market_id: market.id,
+            option_id: newOpt.id,
+            probability: price
+         });
+       }
+  }
 }

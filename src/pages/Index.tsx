@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Navbar from "@/components/Navbar";
 import MarketCard from "@/components/MarketCard";
-import SyncMarketsButton from "@/components/SyncMarketsButton";
+import AddMarketButton from "@/components/AddMarketButton";
 
 interface Market {
   id: string;
@@ -95,7 +95,7 @@ const Index = () => {
               Trade on real-world events with fake money. Track your performance risk-free.
             </p>
           </div>
-          <SyncMarketsButton />
+          <AddMarketButton />
         </div>
 
         <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
@@ -116,10 +116,15 @@ const Index = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredMarkets.map((market) => {
-            // Support both binary and multi-choice markets
-            const firstOption = market.options[0];
-            const secondOption = market.options[1];
+            // Determine if market is binary or multi-outcome
+            // My generic sync might treat Yes/No as options "Yes" and "No"
+            const isBinary = market.options.length === 2 && 
+                            market.options.some(o => o.title === 'Yes') && 
+                            market.options.some(o => o.title === 'No');
             
+            const yesOption = market.options.find(o => o.title === 'Yes');
+            const noOption = market.options.find(o => o.title === 'No');
+
             return (
               <MarketCard
                 key={market.id}
@@ -127,8 +132,9 @@ const Index = () => {
                 title={market.title}
                 icon={market.icon}
                 category={market.category}
-                yesProb={firstOption?.current_probability || 50}
-                noProb={secondOption?.current_probability || (100 - (firstOption?.current_probability || 50))}
+                yesProb={isBinary ? yesOption?.current_probability : undefined}
+                noProb={isBinary ? noOption?.current_probability : undefined}
+                options={!isBinary ? market.options.sort((a, b) => b.current_probability - a.current_probability) : undefined}
               />
             );
           })}
